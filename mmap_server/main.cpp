@@ -64,6 +64,12 @@ static void GenerateTestImage(int w, int h, uint8_t color, uint8_t *buffer) {
     for (int x = 0; x < w; ++x)
       *ptr++ = color;
   }
+
+  ptr = buffer;
+  for (int y = 0; y < (rect_size / 2); ++y) {
+    for (int x = 0; x < (rect_size / 2); ++x)
+        ptr[y * w + x] = ~color;
+  }
 }
 
 
