@@ -1,15 +1,29 @@
 #include "vdx.h"
 
+#include <cassert>
 #include <cinttypes>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <utility>
 
 #include <Windows.h>
 
-#define VDX_PROTO
+// min/max macro defined in Windows.h and can be undefined
+// by defining NOMINMAX before including Windows.h.
+// However, because Windows.h also included into vdx.h, this would
+// not have an effect here. So, we just undefine these here
+// if we see them.
+#if defined(min)
+#undef min
+#endif
 
+#if defined(max)
+#undef max
+#endif
+
+#define VDX_USE_GRAYSCALE_BITMAP
 
 namespace vdx {
 
@@ -22,7 +36,7 @@ const static std::wstring kMappedFileName = { L"azvs_shmem$$$.tmp" };
 // Full HD
 const int kMaxSupportedImageWidth = 1920;
 const int kMaxSupportedImageHeight = 1080;
-#ifdef VDX_PROTO
+#ifdef VDX_USE_GRAYSCALE_BITMAP
 const int kDefaultBytesPerPixel = 1;  // 8 bit grayscale
 #else
 const int kDefaultBytesPerPixel = 3;  // 8 bit RGB
@@ -42,19 +56,19 @@ inline T GetStride(T width, int bpp) {
   return Pad32(width * bpp);
 }
 
-template<class Ptr_>
+template <class Ptr_>
 inline Ptr_ ptr_add(Ptr_ p, ptrdiff_t amount) {
   static_assert(std::is_pointer<Ptr_>::value, "Ptr_ must be pointer type");
-  return reinterpret_cast<Ptr_>(reinterpret_cast<uint8_t *>(p)+amount);
+  return reinterpret_cast<Ptr_>(reinterpret_cast<uint8_t *>(p) + amount);
 }
 
-template<class Ptr_>
+template <class Ptr_>
 inline Ptr_ ptr_sub(Ptr_ p, ptrdiff_t amount) {
   static_assert(std::is_pointer<Ptr_>::value, "Ptr_ must be pointer type");
-  return reinterpret_cast<Ptr_>(reinterpret_cast<uint8_t *>(p)-amount);
+  return reinterpret_cast<Ptr_>(reinterpret_cast<uint8_t *>(p) - amount);
 }
 
-template<class R_, class Ptr1_, class Ptr2_>
+template <class R_, class Ptr1_, class Ptr2_>
 inline R_ ptr_diff(Ptr1_ p1, Ptr2_ p2) {
   static_assert(std::is_pointer<Ptr1_>::value, "Ptr1_ must be pointer type");
   static_assert(std::is_pointer<Ptr2_>::value, "Ptr2_ must be pointer type");
@@ -107,7 +121,12 @@ bool VDX::Open(int width, int height) {
   // faster with aligned data.
   shmem_size_ = sizeof(BITMAP) + sizeof(std::max_align_t) + stride_ * height_;
 
-  event_.Set(CreateEvent(NULL, FALSE, FALSE, ready_event_name_.c_str()));
+  // 4Gb ummm... is a bit too much for a humble image.
+  assert(shmem_size_ <= std::numeric_limits<int32_t>::max());
+  if (shmem_size_ > std::numeric_limits<int32_t>::max())
+    goto exit;
+
+  event_.Set(CreateEvent(nullptr, FALSE, FALSE, ready_event_name_.c_str()));
   if (!event_.IsValid())
     goto exit;
 
@@ -119,26 +138,23 @@ bool VDX::Open(int width, int height) {
   if ((tmp_path_len + kMappedFileName.size()) > MAX_PATH)
     goto exit;
 
-#pragma warning(suppress:4996)
+#pragma warning(suppress : 4996)
   wcscpy(&temp_path[tmp_path_len], kMappedFileName.c_str());
 
   file_.Set(CreateFile(temp_path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
                        nullptr, CREATE_ALWAYS,
-                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE,
+                       FILE_ATTRIBUTE_NORMAL, /*| FILE_FLAG_DELETE_ON_CLOSE,*/
                        nullptr));
   if (!file_.IsValid())
     goto exit;
 
-  DWORD mmap_size_h = (shmem_size_ >> 32) & 0xFFFFFFFF;
-  DWORD mmap_size_l = shmem_size_ & 0xFFFFFFFF;
-
   // Increase file size
-  SetFilePointer(file_, shmem_size_, NULL, FILE_BEGIN);
+  SetFilePointer(file_, static_cast<int32_t>(shmem_size_), nullptr, FILE_BEGIN);
   if (SetEndOfFile(file_) == 0)
     goto exit;
 
   mmap_.Set(CreateFileMapping(file_, nullptr, PAGE_READWRITE | SEC_COMMIT,
-                              mmap_size_h, mmap_size_l,
+                              0, static_cast<int32_t>(shmem_size_),
                               shared_memory_name_.c_str()));
   if (!mmap_.IsValid())
     goto exit;
@@ -176,27 +192,22 @@ void *VDX::WriteImageHeader(int format, int w, int h) {
   if (view_ == nullptr)
     return nullptr;
 
-#ifdef VDX_PROTO
-  // TODO: Temporary here until proper bitmap conversion is implemented.
   if (w > width_ || h > height_)
     return nullptr;
-#endif
+
+  assert(width_ % 2 == 0);
 
   BITMAP *bitmap = reinterpret_cast<BITMAP *>(view_);
   bitmap->bmType = 0;
-#ifdef VDX_PROTO
-  bitmap->bmWidth = w;
-  bitmap->bmHeight = h;
-  bitmap->bmWidthBytes = stride_;
-  bitmap->bmPlanes = 1;
-  bitmap->bmBitsPixel = bytes_per_pixel_ * 8;
-#else
   bitmap->bmWidth = width_;
   bitmap->bmHeight = height_;
   bitmap->bmWidthBytes = stride_;
+#ifdef VDX_USE_GRAYSCALE_BITMAP
+  bitmap->bmPlanes = 1;
+#else
   bitmap->bmPlanes = 3;
-  bitmap->bmBitsPixel = bytes_per_pixel_ * 8;
 #endif
+  bitmap->bmBitsPixel = bytes_per_pixel_ * 8;
 
   void *bits = ptr_add(view_, sizeof(BITMAP));
   size_t bits_space = shmem_size_ - sizeof(BITMAP);
