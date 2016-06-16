@@ -71,7 +71,7 @@ void GenerateCheckerboard(int w, int h, uint8_t color, uint8_t *buffer) {
   // Bottom border
   for (int y = 0; y < b_border_size - 1; ++y) {
     *ptr++ = cinv;
-    for (int x = 1; x < w - 1; ++x)
+    for (int x = 0; x < w - 2; ++x)
       *ptr++ = color;
     *ptr++ = cinv;
   }
@@ -86,6 +86,7 @@ void GenerateCheckerboard(int w, int h, uint8_t color, uint8_t *buffer) {
       ptr[y * w + x] = cinv;
   }
 
+  // Origin single dot
   *ptr = color;
 }
 
