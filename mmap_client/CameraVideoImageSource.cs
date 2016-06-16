@@ -155,15 +155,20 @@ namespace Shadows.Modules.ServiceAndDiagnostics.ViewModels
             if (this.refreshThread != null)
             {
                 this.refreshThread.Join();
+                this.refreshThread = null;
             }
 
             if (this.readyEvent != null)
             {
-                this.readyEvent.Close();
+                this.readyEvent.Dispose();
                 this.readyEvent = null;
             }
 
-            this.view = null;
+            if (this.view != null)
+            {
+                this.view.Dispose();
+                this.view = null;
+            }
 
             if (this.sharedMemory != null)
             {

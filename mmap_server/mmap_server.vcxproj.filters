@@ -21,6 +21,9 @@
     <ClCompile Include="vdx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="test_image_generators.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vdx.h">

@@ -24,6 +24,7 @@
 #endif
 
 #define VDX_USE_GRAYSCALE_BITMAP
+// #define MMAP_TO_FILE
 
 namespace vdx {
 
@@ -121,7 +122,8 @@ bool VDX::Open(int width, int height) {
   // faster with aligned data.
   shmem_size_ = sizeof(BITMAP) + sizeof(std::max_align_t) + stride_ * height_;
 
-  // 4Gb ummm... is a bit too much for a humble image.
+  // 2Gb ummm... is a bit too much for a humble image.
+  // So the size is limited to 32 bit (signed).
   assert(shmem_size_ <= std::numeric_limits<int32_t>::max());
   if (shmem_size_ > std::numeric_limits<int32_t>::max())
     goto exit;
@@ -130,6 +132,9 @@ bool VDX::Open(int width, int height) {
   if (!event_.IsValid())
     goto exit;
 
+  HANDLE file_handle = INVALID_HANDLE_VALUE;
+
+#if defined(MMAP_TO_FILE)
   wchar_t temp_path[MAX_PATH + 1];
   DWORD tmp_path_len = GetTempPath(MAX_PATH + 1, temp_path);
   if (tmp_path_len == 0 || tmp_path_len > MAX_PATH)
@@ -153,7 +158,10 @@ bool VDX::Open(int width, int height) {
   if (SetEndOfFile(file_) == 0)
     goto exit;
 
-  mmap_.Set(CreateFileMapping(file_, nullptr, PAGE_READWRITE | SEC_COMMIT,
+  file_handle = file_.Get();
+#endif
+
+  mmap_.Set(CreateFileMapping(file_handle, nullptr, PAGE_READWRITE | SEC_COMMIT,
                               0, static_cast<int32_t>(shmem_size_),
                               shared_memory_name_.c_str()));
   if (!mmap_.IsValid())
@@ -202,7 +210,7 @@ void *VDX::WriteImageHeader(int format, int w, int h) {
   bitmap->bmWidth = width_;
   bitmap->bmHeight = height_;
   bitmap->bmWidthBytes = stride_;
-#ifdef VDX_USE_GRAYSCALE_BITMAP
+#if defined(VDX_USE_GRAYSCALE_BITMAP)
   bitmap->bmPlanes = 1;
 #else
   bitmap->bmPlanes = 3;
@@ -216,7 +224,7 @@ void *VDX::WriteImageHeader(int format, int w, int h) {
   if (aligned == nullptr)
     return nullptr;
 
-  bitmap->bmBits = ptr_diff<LPVOID>(aligned, bits);
+  bitmap->bmBits = ptr_diff<LPVOID>(aligned, view_);
 
   return aligned;
 }
